@@ -793,6 +793,26 @@ async def cmd_fact(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(f"🎵 *Факт дня о музыке*\n\n{fact}", parse_mode="Markdown")
 
 
+async def cmd_subscribers(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    ADMIN_ID = 601054792
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Только для администратора.")
+        return
+    conn = sqlite3.connect(DB_PATH)
+    subs = conn.execute("SELECT user_id, username, taste_profile FROM weekly_subscribers").fetchall()
+    all_users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    conn.close()
+    if not subs:
+        await update.message.reply_text("Подписчиков пока нет.")
+        return
+    text = f"📋 *Подписчики на еженедельный плейлист:* {len(subs)} из {all_users} пользователей\n\n"
+    for user_id, username, taste in subs:
+        name = f"@{username}" if username else f"id{user_id}"
+        taste_short = (taste[:40] + "…") if taste and len(taste) > 40 else (taste or "—")
+        text += f"• {name} — _{taste_short}_\n"
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Опрос отменён. Напишите /start чтобы начать заново.",
                                     reply_markup=ReplyKeyboardRemove())
@@ -1059,6 +1079,7 @@ async def post_init(app: Application) -> None:
         ("stats", "📊 Статистика бота"),
         ("fact", "🎵 Факт дня о музыке"),
         ("cancel", "❌ Отменить текущий опрос"),
+        ("subscribers", "👥 Список подписчиков (админ)"),
     ])
 
 
@@ -1094,6 +1115,7 @@ def main() -> None:
     app.add_handler(CommandHandler("weekly", cmd_weekly))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("fact", cmd_fact))
+    app.add_handler(CommandHandler("subscribers", cmd_subscribers))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(InlineQueryHandler(inline_query_handler))
 
