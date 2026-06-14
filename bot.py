@@ -1041,7 +1041,19 @@ def main() -> None:
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", cmd_start)],
         states={i: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_answer)] for i in range(len(QUESTIONS))},
-        fallbacks=[CommandHandler("cancel", cmd_cancel)],
+        fallbacks=[
+            CommandHandler("cancel", cmd_cancel),
+            CommandHandler("history", cmd_history),
+            CommandHandler("profile", cmd_profile),
+            CommandHandler("favorites", cmd_favorites),
+            CommandHandler("top", cmd_top),
+            CommandHandler("mood", cmd_mood),
+            CommandHandler("find", cmd_find),
+            CommandHandler("weekly", cmd_weekly),
+            CommandHandler("stats", cmd_stats),
+            CommandHandler("fact", cmd_fact),
+        ],
+        allow_reentry=True,
     )
 
     app.add_handler(conv)
