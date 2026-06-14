@@ -635,10 +635,35 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         await update.message.reply_text(QUESTIONS[step], parse_mode="Markdown")
         return step
     else:
-        await update.message.reply_text("✨ Отлично! Составляю ваш персональный плейлист...")
-        premium = is_premium(update.effective_user.id)
-        await build_playlist(update, context, context.user_data["answers"], premium=premium)
-        return ConversationHandler.END
+        group_id = context.user_data.get("group_id")
+        if group_id:
+            # Сохраняем ответы участника в групповую сессию
+            answers_block = "\n".join(context.user_data["answers"])
+            conn = sqlite3.connect(DB_PATH)
+            row = conn.execute("SELECT members, answers FROM group_sessions WHERE group_id=?", (group_id,)).fetchone()
+            if row:
+                members = row[0]
+                existing = row[1] or ""
+                user_id = str(update.effective_user.id)
+                if user_id not in members.split(","):
+                    members += f",{user_id}"
+                new_answers = (existing + "|||" + answers_block) if existing else answers_block
+                conn.execute("UPDATE group_sessions SET members=?, answers=? WHERE group_id=?",
+                             (members, new_answers, group_id))
+                conn.commit()
+            conn.close()
+            await update.message.reply_text(
+                "✅ Ваши ответы добавлены в общий плейлист!\n\n"
+                "Когда все ответят — создатель плейлиста нажмёт кнопку *«Составить общий плейлист»*.",
+                parse_mode="Markdown"
+            )
+            context.user_data.pop("group_id", None)
+            return ConversationHandler.END
+        else:
+            await update.message.reply_text("✨ Отлично! Составляю ваш персональный плейлист...")
+            premium = is_premium(update.effective_user.id)
+            await build_playlist(update, context, context.user_data["answers"], premium=premium)
+            return ConversationHandler.END
 
 
 async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -935,20 +960,32 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if data.startswith("group_build_"):
         group_id = data.split("_", 2)[2]
         conn = sqlite3.connect(DB_PATH)
-        row = conn.execute("SELECT answers FROM group_sessions WHERE group_id=?", (group_id,)).fetchone()
+        row = conn.execute("SELECT answers, members FROM group_sessions WHERE group_id=?", (group_id,)).fetchone()
         conn.close()
         if not row or not row[0]:
-            await query.message.reply_text("Пока никто не ответил. Поделитесь ссылкой с друзьями!")
+            await query.message.reply_text(
+                "⏳ Пока никто не ответил на вопросы.\n\n"
+                "Поделитесь ссылкой с друзьями и попросите их пройти опрос!"
+            )
             return
         all_answers = row[0].split("|||")
+        member_count = len([m for m in row[1].split(",") if m])
+        # Собираем ответы всех участников вперемешку
         combined = []
-        for i in range(len(LABELS)):
-            for ans_block in all_answers:
-                parts = ans_block.split("\n")
-                if i < len(parts):
-                    combined.append(parts[i])
-        await query.message.reply_text("🎉 Составляю общий плейлист для всей компании!")
-        await build_playlist(update, context, combined[:len(LABELS)], save=False)
+        for ans_block in all_answers:
+            parts = [p.strip() for p in ans_block.split("\n") if p.strip()]
+            combined.extend(parts)
+        combined = combined[:len(LABELS)]
+        if not combined:
+            await query.message.reply_text("Не удалось собрать ответы. Попробуйте позже.")
+            return
+        await query.message.reply_text(
+            f"🎉 Составляю общий плейлист для *{member_count}* участников...",
+            parse_mode="Markdown"
+        )
+        # build_playlist требует update.message — используем query.message через патч
+        update.message = query.message
+        await build_playlist(update, context, combined, save=False)
         return
 
     # Мои плейлисты
