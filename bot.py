@@ -609,10 +609,18 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         )
 
     context.user_data["answers"] = []
+
+    # Проверяем статус подписки
+    conn = sqlite3.connect(DB_PATH)
+    is_subscribed = conn.execute("SELECT 1 FROM weekly_subscribers WHERE user_id=?", (user.id,)).fetchone()
+    conn.close()
+    sub_btn = ("🔕 Отписаться от рассылки", "weekly_off") if is_subscribed else ("🔔 Подписаться на плейлист недели", "weekly_on_start")
+
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🎵 Мой плейлист", callback_data="solo_start")],
         [InlineKeyboardButton("👥 Плейлист для компании", callback_data="group_start")],
         [InlineKeyboardButton("💎 Премиум плейлист", callback_data="premium_start")],
+        [InlineKeyboardButton(sub_btn[0], callback_data=sub_btn[1])],
     ])
     await update.message.reply_text("Выберите тип плейлиста:", reply_markup=keyboard)
     return Q1
@@ -974,12 +982,20 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         )
         return
 
-    # Еженедельный — вкл
+    # Еженедельный — вкл (из плейлиста)
     if data == "weekly_on":
         playlists = get_user_playlists(user.id)
         taste = playlists[0][2].split("\n")[0] if playlists else ""
         subscribe_weekly(user.id, user.username or user.first_name, taste)
         await query.message.reply_text("🔔 Подписка оформлена! Каждый понедельник в 09:00 буду присылать новый плейлист.")
+        return
+
+    # Еженедельный — вкл (из главного меню)
+    if data == "weekly_on_start":
+        playlists = get_user_playlists(user.id)
+        taste = playlists[0][2].split("\n")[0] if playlists else "pop"
+        subscribe_weekly(user.id, user.username or user.first_name, taste)
+        await query.answer("✅ Подписка оформлена!", show_alert=True)
         return
 
     # Еженедельный — выкл
