@@ -345,15 +345,17 @@ async def search_deezer_many(query: str, limit: int = 5) -> list:
 
 
 async def find_cover_version(track_name: str, original_artist: str) -> Optional[dict]:
+    """Find a cover version: same song, different artist."""
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get("https://api.deezer.com/search", params={"q": track_name, "limit": 10}, timeout=10)
-            data = resp.json()
-        tracks = data.get("data", [])
-        for track in tracks:
-            artist = track.get("artist", {}).get("name", "")
-            if artist.lower() != original_artist.lower():
-                return track
+            # Сначала ищем по названию песни
+            for query in [track_name, f"{track_name} cover"]:
+                resp = await client.get("https://api.deezer.com/search", params={"q": query, "limit": 20}, timeout=10)
+                tracks = resp.json().get("data", [])
+                for track in tracks:
+                    artist = track.get("artist", {}).get("name", "")
+                    if artist.lower() != original_artist.lower():
+                        return track
         return None
     except Exception as e:
         logger.warning(f"Cover search error: {e}")
@@ -361,20 +363,42 @@ async def find_cover_version(track_name: str, original_artist: str) -> Optional[
 
 
 async def get_similar(artist: str, track: str) -> Optional[dict]:
+    """Get similar track via Last.fm, fallback to Deezer search by artist."""
+    # Пробуем Last.fm
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 "https://ws.audioscrobbler.com/2.0/",
                 params={"method": "track.getSimilar", "artist": artist, "track": track,
-                        "api_key": LASTFM_API_KEY, "format": "json", "limit": 1},
+                        "api_key": LASTFM_API_KEY, "format": "json", "limit": 5},
                 timeout=10
             )
             data = resp.json()
         similar = data.get("similartracks", {}).get("track", [])
-        return similar[0] if similar else None
+        if similar:
+            return similar[0]
     except Exception as e:
         logger.warning(f"LastFM error: {e}")
-        return None
+
+    # Фолбэк: ищем другие треки того же исполнителя на Deezer
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get("https://api.deezer.com/search",
+                                    params={"q": f"artist:\"{artist}\"", "limit": 10}, timeout=10)
+            tracks = resp.json().get("data", [])
+        track_lower = track.lower()
+        for t in tracks:
+            if t.get("title", "").lower() != track_lower:
+                # Возвращаем как псевдо-объект Last.fm
+                return {
+                    "name": t.get("title", ""),
+                    "artist": {"name": t.get("artist", {}).get("name", artist)},
+                    "_deezer": t,  # уже готовый объект Deezer
+                }
+    except Exception as e:
+        logger.warning(f"Deezer fallback error: {e}")
+
+    return None
 
 
 async def search_by_lyrics(lyrics: str) -> Optional[str]:
@@ -473,11 +497,15 @@ async def build_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE,
             # Похожий трек
             similar_lastfm = await get_similar(artist, name)
             if similar_lastfm:
-                s_name = similar_lastfm.get("name", "")
-                s_artist = (similar_lastfm.get("artist", {}).get("name", "")
-                            if isinstance(similar_lastfm.get("artist"), dict)
-                            else similar_lastfm.get("artist", ""))
-                similar_deezer = await search_deezer(f"{s_artist} {s_name}")
+                # Если фолбэк уже вернул готовый Deezer-объект
+                if "_deezer" in similar_lastfm:
+                    similar_deezer = similar_lastfm["_deezer"]
+                else:
+                    s_name = similar_lastfm.get("name", "")
+                    s_artist = (similar_lastfm.get("artist", {}).get("name", "")
+                                if isinstance(similar_lastfm.get("artist"), dict)
+                                else similar_lastfm.get("artist", ""))
+                    similar_deezer = await search_deezer(f"{s_artist} {s_name}")
                 if similar_deezer:
                     line2 = await send_track_card(update, label, similar_deezer, is_recommendation=True)
                     track_lines.append(line2)
