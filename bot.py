@@ -779,29 +779,38 @@ async def cmd_mood(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def cmd_find(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not context.args:
-        await update.message.reply_text("🔍 Напишите строчку из песни:\n`/find текст песни`", parse_mode="Markdown")
+        await update.message.reply_text(
+            "🔍 *Поиск песни по строчке из текста*\n\n"
+            "Напишите любую строчку из песни:\n`/find я тебя никогда не забуду`\n`/find every breath you take`",
+            parse_mode="Markdown"
+        )
         return
 
     lyrics = " ".join(context.args)
-    await update.message.reply_text(f"🔍 Ищу песню по тексту: _{lyrics}_...", parse_mode="Markdown")
+    await update.message.reply_text(f"🔍 Ищу: _{lyrics}_...", parse_mode="Markdown")
 
-    result = await search_by_lyrics(lyrics)
-    if result:
-        track = await search_deezer(result)
-        if track:
-            await update.message.reply_text(f"✅ Нашёл: *{result}*", parse_mode="Markdown")
+    # Пробуем несколько вариантов поиска
+    tracks = await search_deezer_many(lyrics, limit=5)
+
+    if not tracks:
+        # Пробуем только первые слова
+        short = " ".join(lyrics.split()[:4])
+        tracks = await search_deezer_many(short, limit=5)
+
+    if tracks:
+        await update.message.reply_text(
+            f"✅ Нашёл {len(tracks)} вариантов — вот похожие треки:",
+        )
+        for track in tracks[:3]:
             await send_track_card(update, "🔍 Найденный трек", track)
-        else:
-            yt = youtube_link(result)
-            await update.message.reply_text(f"✅ Возможно это: *{result}*\n[Поиск на YouTube]({yt})",
-                                            parse_mode="Markdown")
     else:
-        # Ищем напрямую по тексту
-        track = await search_deezer(lyrics)
-        if track:
-            await send_track_card(update, "🔍 Найденный трек", track)
-        else:
-            await update.message.reply_text("😕 Не смог найти. Попробуйте написать точнее.")
+        yt = youtube_link(lyrics)
+        await update.message.reply_text(
+            f"😕 Не смог найти в базе.\n\n"
+            f"Попробуйте [поискать на YouTube Music]({yt}) — там точно найдётся!",
+            parse_mode="Markdown",
+            disable_web_page_preview=True
+        )
 
 
 async def cmd_weekly(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
