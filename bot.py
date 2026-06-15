@@ -402,15 +402,21 @@ async def get_similar(artist: str, track: str) -> Optional[dict]:
 
 
 async def search_by_lyrics(lyrics: str) -> Optional[str]:
-    """Search song by lyrics fragment using lyrics.ovh."""
+    """Search song by lyrics fragment — uses Deezer suggest."""
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.get(f"https://api.lyrics.ovh/suggest/{urllib.parse.quote(lyrics)}", timeout=10)
+            resp = await client.get(
+                "https://api.deezer.com/search",
+                params={"q": lyrics, "limit": 1},
+                timeout=10
+            )
             data = resp.json()
         tracks = data.get("data", [])
         if tracks:
             t = tracks[0]
-            return f"{t.get('artist', {}).get('name', '')} — {t.get('title', '')}"
+            artist = t.get("artist", {}).get("name", "")
+            title = t.get("title", "")
+            return f"{artist} — {title}"
         return None
     except Exception as e:
         logger.warning(f"Lyrics search error: {e}")
