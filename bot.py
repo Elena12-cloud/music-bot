@@ -83,6 +83,7 @@ MOODS = {
 }
 
 Q1, Q2, Q3, Q4, Q5, Q6, Q7, Q8 = range(8)
+FIND_WAITING = 100
 
 # ─── База данных ──────────────────────────────────────────────────────────────
 
@@ -777,37 +778,42 @@ async def cmd_mood(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await send_track_card(update, f"🎭 {mood_input.capitalize()}", track)
 
 
-async def cmd_find(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not context.args:
-        await update.message.reply_text(
-            "🔍 *Поиск песни по строчке из текста*\n\n"
-            "Напишите любую строчку из песни:\n`/find я тебя никогда не забуду`\n`/find every breath you take`",
-            parse_mode="Markdown"
-        )
-        return
+async def cmd_find(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if context.args:
+        # Если текст уже написан в одну строку — сразу ищем
+        lyrics = " ".join(context.args)
+        await do_find(update, lyrics)
+        return ConversationHandler.END
+    # Иначе спрашиваем
+    await update.message.reply_text(
+        "🔍 Напишите строчку из песни — я найду её:",
+        parse_mode="Markdown"
+    )
+    return FIND_WAITING
 
-    lyrics = " ".join(context.args)
+
+async def handle_find_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    lyrics = update.message.text.strip()
+    await do_find(update, lyrics)
+    return ConversationHandler.END
+
+
+async def do_find(update: Update, lyrics: str) -> None:
     await update.message.reply_text(f"🔍 Ищу: _{lyrics}_...", parse_mode="Markdown")
 
-    # Пробуем несколько вариантов поиска
     tracks = await search_deezer_many(lyrics, limit=5)
-
     if not tracks:
-        # Пробуем только первые слова
         short = " ".join(lyrics.split()[:4])
         tracks = await search_deezer_many(short, limit=5)
 
     if tracks:
-        await update.message.reply_text(
-            f"✅ Нашёл {len(tracks)} вариантов — вот похожие треки:",
-        )
+        await update.message.reply_text(f"✅ Нашёл {len(tracks)} вариантов:")
         for track in tracks[:3]:
             await send_track_card(update, "🔍 Найденный трек", track)
     else:
         yt = youtube_link(lyrics)
         await update.message.reply_text(
-            f"😕 Не смог найти в базе.\n\n"
-            f"Попробуйте [поискать на YouTube Music]({yt}) — там точно найдётся!",
+            f"😕 Не смог найти.\n\n[Поискать на YouTube Music]({yt})",
             parse_mode="Markdown",
             disable_web_page_preview=True
         )
@@ -1155,9 +1161,12 @@ def main() -> None:
     init_db()
     app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
+    states_dict = {i: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_answer)] for i in range(len(QUESTIONS))}
+    states_dict[FIND_WAITING] = [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_find_input)]
+
     conv = ConversationHandler(
-        entry_points=[CommandHandler("start", cmd_start)],
-        states={i: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_answer)] for i in range(len(QUESTIONS))},
+        entry_points=[CommandHandler("start", cmd_start), CommandHandler("find", cmd_find)],
+        states=states_dict,
         fallbacks=[
             CommandHandler("cancel", cmd_cancel),
             CommandHandler("history", cmd_history),
