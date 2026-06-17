@@ -769,12 +769,13 @@ async def cmd_mood(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await update.message.reply_text(f"🎭 Подбираю музыку для настроения *{mood_input}*...", parse_mode="Markdown")
 
-    tracks = await search_deezer_many(query, limit=5)
+    tracks = await search_deezer_many(query, limit=10)
     if not tracks:
         await update.message.reply_text("Не удалось найти треки. Попробуйте позже.")
         return
 
-    for track in tracks[:3]:
+    await update.message.reply_text(f"🎭 Вот 5 треков для настроения *{mood_input}*:", parse_mode="Markdown")
+    for track in tracks[:5]:
         await send_track_card(update, f"🎭 {mood_input.capitalize()}", track)
 
 
