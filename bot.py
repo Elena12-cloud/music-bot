@@ -484,6 +484,22 @@ async def build_playlist(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
     for answer, label in zip(answers[:limit], LABELS[:limit]):
         track = await search_deezer(answer)
+
+        # Если не нашли — пробуем по первым 3 словам
+        if not track:
+            short = " ".join(answer.split()[:3])
+            track = await search_deezer(short)
+
+        # Если всё ещё не нашли — берём жанр из ответа или популярный трек
+        if not track:
+            fallback_queries = ["popular hits", "лучшие хиты", "top songs"]
+            for fq in fallback_queries:
+                tracks_list = await search_deezer_many(fq, limit=10)
+                if tracks_list:
+                    import random
+                    track = random.choice(tracks_list)
+                    break
+
         if track:
             line = await send_track_card(update, label, track, is_recommendation=False)
             track_lines.append(line)
